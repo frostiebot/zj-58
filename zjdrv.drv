@@ -1,5 +1,5 @@
 // CUPS PPD Compiler CUPS v2.1.3
-// (Don't edit .ppd directly, edit this file instead, then use 
+// (Don't edit .ppd directly, edit this file instead, then use
 //	ppdc zjdrv.drv to generate zj58.ppd, zj80.ppd and others)
 
 // common for all thermal printers
@@ -113,6 +113,47 @@ Group "*CashDrawerTune/Cash Drawer Tune"
     Choice "60XMS/192mS" "<</cupsInteger5 96>>setpagedevice"
     Choice "70XMS/224mS" "<</cupsInteger5 112>>setpagedevice"
     Choice "80XMS/256mS" "<</cupsInteger5 128>>setpagedevice"
+
+Group "PrinterSettings/Printer Settings"
+  // Option "UseCustomDarkness/Use Custom Darkness" Boolean DocumentSetup 10
+  //  Choice True ""
+  //  *Choice False ""
+
+  Option "Darkness/Darkness" PickOne DocumentSetup 10
+    Choice "Light" "<</cupsInteger7 2/cupsInteger8 15/cupsInteger9 4>>setpagedevice"
+    Choice "Medium" "<</cupsInteger7 4/cupsInteger8 40/cupsInteger9 10>>setpagedevice"
+   *Choice "Normal" "<</cupsInteger7 7/cupsInteger8 80/cupsInteger9 20>>setpagedevice"
+    Choice "Dark" "<</cupsInteger7 12/cupsInteger8 120/cupsInteger9 30>>setpagedevice"
+    Choice "Very-Dark/Very Dark" "<</cupsInteger7 20/cupsInteger8 200/cupsInteger9 40>>setpagedevice"
+
+    Attribute CustomDarkness True "<<//cupsInteger7 4 -1/cupsInteger8 4 -1/cupsInteger9 4 -1>>setpagedevice"
+    Attribute ParamCustomDarkness Heating-dot "1 int 0 255"
+    Attribute ParamCustomDarkness Heating-time "2 int 3 255"
+    Attribute ParamCustomDarkness Heating-interval "3 int 0 255"
+
+  // Option "CustomDarkness/Custom Darkness" PickOne DocumentSetup 10
+  //   *CustomDarkness True: "<<//cupsInteger7 4 -1/cupsInteger8 4 -1/cupsInteger9 4 -1>>setpagedevice"
+  //   *ParamCustomDarkness Heating-dot: 1 int 0 255
+  //   *ParamCustomDarkness Heating-time: 2 int 3 255
+  //   *ParamCustomDarkness Heating-interval: 3 int 0 255
+
+  Option "Density/Density" PickOne DocumentSetup 10
+    Choice "Low" "<</cupsInteger10 4/cupsInteger11 1>>setpagedevice"
+   *Choice "Medium" "<</cupsInteger10 16/cupsInteger11 4>>setpagedevice"
+    Choice "High" "<</cupsInteger10 32/cupsInteger11 8>>setpagedevice"
+
+    Attribute CustomDensity True "<<//cupsInteger10 4 -1/cupsInteger11 4 -1>>setpagedevice"
+    Attribute ParamCustomDensity Density "1 int 0 32"
+    Attribute ParamCustomDensity Break-time "2 int 3 8"
+
+  // Option "CustomDensity/Custom Density" PickOne DocumentSetup 10
+  //   *CustomDensity True: "<<//cupsInteger10 4 -1/cupsInteger11 4 -1>>setpagedevice"
+  //   *ParamCustomDensity Density: 1 int 0 32
+  //   *ParamCustomDensity Break-Time: 2 int 3 8
+
+  // Option "Sleep/Allow Sleeping" Boolean DocumentSetup 10
+  //  *Choice True/Yes ""
+  //   Choice False/No ""
 
 // installable options
 

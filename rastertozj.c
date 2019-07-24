@@ -20,17 +20,28 @@ static inline int min(int a, int b) {
 // settings and their stuff
 struct settings_ {
   int modelNum; // the only setting we get from PPD.
+
   unsigned CashDrawer1;
   unsigned CashDrawer2;
   unsigned CashDrawer1On;
   unsigned CashDrawer1Off;
   unsigned CashDrawer2On;
   unsigned CashDrawer2Off;
+
   cups_bool_t InsertSheet;
   cups_adv_t AdvanceMedia;
   cups_cut_t CutMedia;
+
   unsigned int AdvanceDistance;
+
+  int HeatingDots;
+  int HeatingTime;
+  int HeatingInterval;
+  int PrintDensity;
+  int PrintBreakTime;
+  // int SleepAfter;
 };
+
 struct settings_ settings;
 
 static void initializeSettings(char *commandLineOptionSettings, struct settings_ *pSettings) {
@@ -41,8 +52,7 @@ static void initializeSettings(char *commandLineOptionSettings, struct settings_
   ppdClose(pPpd);
 }
 
-static void update_settings_from_job (cups_page_header2_t * pHeader)
-{
+static void update_settings_from_job(cups_page_header2_t * pHeader) {
   if (!pHeader)
     return;
   settings.CashDrawer1 = pHeader->cupsInteger[0];
@@ -55,6 +65,12 @@ static void update_settings_from_job (cups_page_header2_t * pHeader)
   settings.AdvanceMedia = pHeader->AdvanceMedia;
   settings.CutMedia = pHeader->CutMedia;
   settings.AdvanceDistance = pHeader->AdvanceDistance;
+  settings.HeatingDots = pHeader->cupsInteger[7];
+  settings.HeatingTime = pHeader->cupsInteger[8];
+  settings.HeatingInterval = pHeader->cupsInteger[9];
+  settings.PrintDensity = pHeader->cupsInteger[10];
+  settings.PrintBreakTime = pHeader->cupsInteger[11];
+  // settings.SleepAfter = pHeader->SleepAfter;
 }
 
 #ifndef DEBUGP
@@ -101,7 +117,7 @@ static inline void outputarray(const char *array, int length) {
 
 // output a command. -1 is because we determine them as string literals,
 // so \0 implicitly added at the end, but we don't need it at all
-#define SendCommand(COMMAND) outputarray((COMMAND),sizeof((COMMAND))-1)
+#define SendCommand(COMMAND) outputarray((COMMAND), sizeof((COMMAND)) - 1)
 
 static inline void mputnum(unsigned int val) {
   mputchar(val&0xFFU);
@@ -120,6 +136,8 @@ static inline void mputnum(unsigned int val) {
  * // another commands out-of-spec:
  * esc 'i' - cutter; xprinter android example shows as GS V \1 (1D 56 01)
  * esc '8' - wait{4, cutter also (char[4]){29,'V','A',20}}; GS V 'A' 20
+ * esc '7' N N N - set printer heating/darkness
+ * DC2 # N - set printing density
  */
 
 // define printer initialize command
@@ -138,18 +156,20 @@ static const char escFlush[] = "\x1bJ";
 //static const char escCut[] = "\x1bi";
 static const char escCut[] = "\x1dV\1";
 
+static const char escPrintSettings[] ="\x1b\x37";
+
+static const char dc2Density[] = "\x12\x23";
+
 // enter raster mode and set up x and y dimensions
 static inline void sendRasterHeader(int xsize, int ysize) {
-  //  outputCommand(rasterModeStartCommand);
   SendCommand(escRasterMode);
   mputnum(xsize);
   mputnum(ysize);
 }
 
-static inline void flushLines(unsigned short lines)
-{
+static inline void flushLines(unsigned short lines) {
   SendCommand(escFlush);
-  mputchar (lines);
+  mputchar(lines);
 }
 
 // print all unprinted (i.e. flush the buffer)
@@ -158,29 +178,38 @@ static inline void flushBuffer() {
 }
 
 // flush, then feed 24 lines
-static inline void flushManyLines(int iLines)
-{
+static inline void flushManyLines(int iLines) {
   DEBUGPRINT("Skip %d empty lines: ", iLines);
-  while ( iLines )
-  {
+  while ( iLines ) {
     int iStride = min (iLines, 24);
     flushLines ( iStride );
     iLines -= iStride;
   }
 }
 
-inline static void CashDrawerEject (unsigned iDrawer, unsigned iOn,
-                                   unsigned iOff)
-{
+inline static void CashDrawerEject (unsigned iDrawer, unsigned iOn, unsigned iOff) {
   SendCommand(escCashDrawerEject);
   mputchar(iDrawer);
   mputchar(iOn);
   mputchar(iOff);
 }
 
-inline static void cutMedia()
-{
+inline static void cutMedia() {
   SendCommand(escCut);
+}
+
+inline static void printSettingsDarkness(int heatingdots, int heatingtime, int heatinginterval) {
+  DEBUGPRINT("Set printer Settings :\n heating dots = %d\nheating time = %d,heating interval = %d\n", heatingdots, heatingtime, heatinginterval);
+  SendCommand(escPrintSettings);
+  mputchar(heatingdots);
+  mputchar(heatingtime);
+  mputchar(heatinginterval);
+}
+
+inline static void printDensity(int printDensity, int printBreakTime) {
+  DEBUGPRINT("Set printer Density :\n printDensity = %d\n printBreakTime = %d\n", printDensity, printBreakTime);
+  SendCommand(dc2Density);
+  mputchar(((char) printBreakTime << 5) | (char) printDensity);
 }
 
 // sent on the beginning of print job
@@ -198,7 +227,6 @@ void finalizeJob() {
     CashDrawerEject(0, settings.CashDrawer1On, settings.CashDrawer1Off);
   if (settings.CashDrawer2 == 2)
     CashDrawerEject(1, settings.CashDrawer2On, settings.CashDrawer2Off);
-//  SendCommand(escInit);
 }
 
 // sent at the end of every page
@@ -222,8 +250,7 @@ void cancelJob() {
 // invoked before starting to print a page
 void startPage() { old_signal = signal(SIGTERM, cancelJob); }
 
-void DebugPrintHeader (cups_page_header2_t* pHeader)
-{
+void DebugPrintHeader (cups_page_header2_t* pHeader) {
   DEBUGPRINT(
       "MediaClass '%s'\n"
       "MediaColor '%s'\n"
@@ -314,8 +341,7 @@ void DebugPrintHeader (cups_page_header2_t* pHeader)
 }
 
 // rearrange (compress) rows in pBuf, discarding tails of them
-static inline unsigned compress_buffer(unsigned char *pBuf, unsigned iSize,
-                         unsigned int iWideStride, unsigned int iStride) {
+static inline unsigned compress_buffer(unsigned char *pBuf, unsigned iSize, unsigned int iWideStride, unsigned int iStride) {
   const unsigned char *pEnd = pBuf + iSize;
   unsigned char *pTarget = pBuf;
   while (pBuf < pEnd) {
@@ -336,8 +362,7 @@ static inline int line_is_empty(const unsigned char *pBuf, unsigned iSize) {
   return -1;
 }
 
-static inline void send_raster(const unsigned char *pBuf, int width8,
-                               int height) {
+static inline void send_raster(const unsigned char *pBuf, int width8, int height) {
   if (!height)
     return;
   DEBUGPRINT("Raster block %dx%d pixels\n", width8 * 8, height);
@@ -406,13 +431,16 @@ int main(int argc, char *argv[]) {
   }
 
   DEBUGSTARTPRINT();
+
   int iCurrentPage = 0;
   // CUPS Page tHeader
   cups_page_header2_t tHeader;
   unsigned char *pRasterBuf = NULL; // Pointer to raster data from CUPS
+
   // Raster stream for printing
   cups_raster_t *pRasterSrc = cupsRasterOpen(fd, CUPS_RASTER_READ);
-  initializeSettings(argv[5],&settings);
+
+  initializeSettings(argv[5], &settings);
 
   DEBUGPRINT("ModelNumber from PPD '%d'\n", settings.modelNum);
 
@@ -431,13 +459,16 @@ int main(int argc, char *argv[]) {
 
     update_settings_from_job( &tHeader );
 
+    printSettingsDarkness(settings.HeatingDots, settings.HeatingTime, settings.HeatingInterval);
+    printDensity(settings.PrintDensity, settings.PrintBreakTime);
+
     if (!iJobStarted)
     {
       setupJob();
       iJobStarted = 1;
     }
 
-    DebugPrintHeader ( &tHeader );
+    DebugPrintHeader( &tHeader );
 
     if (!pRasterBuf) {
       pRasterBuf = malloc(tHeader.cupsBytesPerLine * 24);
@@ -454,50 +485,39 @@ int main(int argc, char *argv[]) {
     foo = (foo + 7) & 0xFFFFFFF8;
     int width_bytes = foo >> 3; // in bytes, [0..0x30]
 
-    DEBUGPRINT("cupsWidth=%d, cupsBytesPerLine=%d; foo=%d, width_bytes=%d",
-        tHeader.cupsWidth, tHeader.cupsBytesPerLine, foo, width_bytes );
+    DEBUGPRINT("cupsWidth=%d, cupsBytesPerLine=%d; foo=%d, width_bytes=%d", tHeader.cupsWidth, tHeader.cupsBytesPerLine, foo, width_bytes);
 
     int iRowsToPrint = tHeader.cupsHeight;
     int zeroy = 0;
 
     // loop over one page, top to bottom by blocks of most 24 scan lines
     while (iRowsToPrint) {
-      fprintf(stderr, "INFO: Printing iCurrentPage %d, %d%% complete...\n",
-              iCurrentPage,
-              (100 * (tHeader.cupsHeight - iRowsToPrint) / tHeader.cupsHeight));
+      fprintf(stderr, "INFO: Printing iCurrentPage %d, %d%% complete...\n", iCurrentPage, (100 * (tHeader.cupsHeight - iRowsToPrint) / tHeader.cupsHeight));
 
       int iBlockHeight = min(iRowsToPrint, 24);
 
-      DEBUGPRINT("--------Processing block of %d, starting from %d lines",
-                 iBlockHeight, tHeader.cupsHeight - iRowsToPrint);
+      DEBUGPRINT("--------Processing block of %d, starting from %d lines", iBlockHeight, tHeader.cupsHeight - iRowsToPrint);
 
       iRowsToPrint -= iBlockHeight;
       unsigned iBytesChunk = 0;
 
       // first, fetch whole block from the image
       if (iBlockHeight)
-        iBytesChunk = cupsRasterReadPixels(
-            pRasterSrc, pRasterBuf, tHeader.cupsBytesPerLine * iBlockHeight);
+        iBytesChunk = cupsRasterReadPixels(pRasterSrc, pRasterBuf, tHeader.cupsBytesPerLine * iBlockHeight);
 
-      DEBUGPRINT("--------Got %d from %d requested bytes",
-                 iBytesChunk,
-                 tHeader.cupsBytesPerLine *
-                     iBlockHeight);
+      DEBUGPRINT("--------Got %d from %d requested bytes", iBytesChunk, tHeader.cupsBytesPerLine * iBlockHeight);
 
       // if original image is wider - rearrange buffer so that our calculated
       // lines come one-by-one without extra gaps
       if (width_bytes < tHeader.cupsBytesPerLine) {
         DEBUGPRINT("--------Compress line from %d to %d bytes", tHeader.cupsBytesPerLine, width_bytes);
-        iBytesChunk = compress_buffer(pRasterBuf, iBytesChunk,
-                                      tHeader.cupsBytesPerLine, width_bytes);
+        iBytesChunk = compress_buffer(pRasterBuf, iBytesChunk, tHeader.cupsBytesPerLine, width_bytes);
       }
 
       // runaround for sometimes truncated output of cupsRasterReadPixels
       if (iBytesChunk < width_bytes * iBlockHeight) {
-        DEBUGPRINT("--------Restore truncated gap of %d bytes",
-                   width_bytes * iBlockHeight - iBytesChunk);
-        memset(pRasterBuf + iBytesChunk, 0,
-               width_bytes * iBlockHeight - iBytesChunk);
+        DEBUGPRINT("--------Restore truncated gap of %d bytes", width_bytes * iBlockHeight - iBytesChunk);
+        memset(pRasterBuf + iBytesChunk, 0, width_bytes * iBlockHeight - iBytesChunk);
         iBytesChunk = width_bytes * iBlockHeight;
       }
 
@@ -544,15 +564,14 @@ int main(int argc, char *argv[]) {
     finishPage();
   } // loop over all pages pages
 
-  if (settings.AdvanceMedia==CUPS_ADVANCE_JOB)
+  if (settings.AdvanceMedia == CUPS_ADVANCE_JOB)
     flushManyLines(settings.AdvanceDistance);
 
   if (settings.CutMedia == CUPS_CUT_JOB)
     cutMedia();
 
   finalizeJob();
-  fputs(iCurrentPage ? "INFO: Ready to print.\n" : "ERROR: No pages found!\n",
-        stderr);
+  fputs(iCurrentPage ? "INFO: Ready to print.\n" : "ERROR: No pages found!\n", stderr);
   DEBUGFINISHPRINT();
   EXITPRINT(iCurrentPage ? EXIT_SUCCESS : EXIT_FAILURE)
 }
